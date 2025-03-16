@@ -1,0 +1,53 @@
+name: Build & Draft Realese Kivy APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set Up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install System Dependancies
+        run: |
+          sudo apt update && sudo apt install -y \
+          python3 python3-pip python3-venv zip unzip \ 
+          build-essential git openjdk-17-jdk \ 
+          libssl-dev libffi-dev ccache autoconf automake \ 
+          libtool pkg-config python3-dev 
+
+      -  name: Install Buildozer & Dependancies
+         run: |
+           pip install --upgrade pip
+           pip install buildozer cython virtualenv
+           
+      - name: Build APK with Buildozer
+        run: |
+          buildozer init
+          buildozer -v android debug
+          
+      - name: Upload APK as Artifact(for testing)
+        uses: actions/upload-artifacts@v3
+        with:
+          name: kivy-apk
+          path: bin/*.apk
+          
+      - name: Create Draft Release
+        id: create_release
+        uses: softprops/actions-gh-release@v1
+        with:
+          tag_name: draft-${{ github.run_id }}
+          name: "Draft release - Build #${{ github.run_number }}"
+          draft: true
+          files: bin/*.apk
+        env:
+          GITHUB_TOKEN : ${{ secrets.GITHUB_TOKEN }}

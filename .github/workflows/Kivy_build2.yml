@@ -3,8 +3,8 @@ name: Build & Draft Release Kivy APK
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  # Removed pull_request trigger to avoid unnecessary builds
+  # Consider adding workflow_dispatch for manual triggers if needed
 
 jobs:
   build:
@@ -26,6 +26,22 @@ jobs:
           libssl-dev libffi-dev ccache autoconf automake \
           libtool pkg-config python3-dev
 
+      - name: Accept Android Licenses
+        run: |
+          mkdir -p ~/.android/licenses
+          echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/licenses/android-sdk-license
+          echo -e "\n84831b9409646a918e30573fb4ad6dbc302d0d79" >> ~/.android/licenses/android-sdk-license
+
+      - name: Cache Buildozer Dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.buildozer
+            ~/.gradle
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
+
       - name: Install Buildozer & Dependencies
         run: |
           pip install --upgrade pip
@@ -33,30 +49,33 @@ jobs:
 
       - name: Build APK with Buildozer
         run: |
-          # Check if buildozer.spec already exists, if not, run buildozer init
-          if [ ! -f buildozer.spec ]; then buildozer init; fi
+          if [ ! -f buildozer.spec ]; then 
+            buildozer init
+            echo "Default buildozer.spec created. Please configure it properly." >&2
+            exit 1
+          fi
           buildozer -v android debug
 
       - name: Verify APK Build
         run: |
-          if [ ! -f bin/*.apk ]; then
+          if ! ls bin/*.apk 1> /dev/null 2>&1; then
             echo "APK build failed"
             exit 1
           fi
 
-      - name: Upload APK as Artifact (for testing)
+      - name: Upload APK as Artifact
         uses: actions/upload-artifact@v3
         with:
           name: kivy-apk
           path: bin/*.apk
 
       - name: Create Draft Release
-        id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: draft-${{ github.run_id }}
-          name: "Draft release - Build #${{ github.run_number }}"
+          tag_name: apk-draft-${{ github.run_number }}
+          name: "Draft Release (Build #${{ github.run_number }})"
           draft: true
+          prerelease: false
           files: bin/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

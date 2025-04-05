@@ -1,0 +1,83 @@
+                    raise BuildInterruptingException(
+                        "aab is meant only for distribution and is not available in debug mode. "
+                        "Instead, you can use apk while building for debugging purposes."
+                    )
+                gradle_task = "assembleDebug"
+            elif args.build_mode == "release":
+                if package_type in ["apk", "aar"]:
+                    gradle_task = "assembleRelease"
+                elif package_type == "aab":
+                    gradle_task = "bundleRelease"
+            else:
+                raise BuildInterruptingException(
+                    "Unknown build mode {} for apk()".format(args.build_mode))
+
+            # WARNING: We should make sure to clean the build directory before building.
+            # See PR: kivy/python-for-android#2705
+            output = shprint(gradlew, "clean", gradle_task, _tail=20,
+                             _critical=True, _env=env)
+        return output, build_args
+
+    def _finish_package(self, args, output, build_args, package_type, output_dir):
+        """
+        Finishes the package after the gradle script run
+        :param args: the parser args
+        :param output: RunningCommand output
+        :param build_args: build args as returned by build.parse_args
+        :param package_type: one of 'apk', 'aar', 'aab'
+        :param output_dir: where to put the package file
+        """
+
+        package_glob = "*-{}.%s" % package_type
+        package_add_version = True
+
+        self.hook("after_apk_assemble")
+
+        info_main('# Copying android package to current directory')
+
+        package_re = re.compile(r'.*Package: (.*\.apk)$')
+        package_file = None
+        for line in reversed(output.splitlines()):
+            m = package_re.match(line)
+            if m:
+                package_file = m.groups()[0]
+                break
+        if not package_file:
+            info_main('# Android package filename not found in build output. Guessing...')
+            if args.build_mode == "release":
+                suffixes = ("release", "release-unsigned")
+            else:
+                suffixes = ("debug", )
+            for suffix in suffixes:
+
+                package_files = glob.glob(join(output_dir, package_glob.format(suffix)))
+                if package_files:
+                    if len(package_files) > 1:
+                        info('More than one built APK found... guessing you '
+                             'just built {}'.format(package_files[-1]))
+                    package_file = package_files[-1]
+                    break
+            else:
+                raise BuildInterruptingException('Couldn\'t find the built APK')
+
+        info_main('# Found android package file: {}'.format(package_file))
+        package_extension = f".{package_type}"
+        if package_add_version:
+            info('# Add version number to android package')
+            package_name = basename(package_file)[:-len(package_extension)]
+            package_file_dest = "{}-{}{}".format(
+                package_name, build_args.version, package_extension)
+            info('# Android package renamed to {}'.format(package_file_dest))
+            shprint(sh.cp, package_file, package_file_dest)
+        else:
+            shprint(sh.cp, package_file, './')
+
+    @require_prebuilt_dist
+    def apk(self, args):
+        output, build_args = self._build_package(args, package_type='apk')
+        output_dir = join(self._dist.dist_dir, "build", "outputs", 'apk', args.build_mode)
+        self._finish_package(args, output, build_args, 'apk', output_dir)
+
+    @require_prebuilt_dist
+    def aar(self, args):
+        output, build_args = self._build_package(args, package_type='aar')
